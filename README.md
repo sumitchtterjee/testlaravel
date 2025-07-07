@@ -45,6 +45,7 @@
 ### Access the User Page
 - Visit: `http://localhost:8000/users`
 - The page will display a paginated table of users fetched from the Random User API.
+- cached 50 data from api
 
 ### Filtering by Gender
 - Use the dropdown in the table header to filter users by gender:
