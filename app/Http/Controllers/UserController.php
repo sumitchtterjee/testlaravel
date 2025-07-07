@@ -107,36 +107,65 @@ class UserController extends Controller
         ]);
     }
 
+    /**
+     * Export the currently filtered and paginated user list as a CSV file.
+     * 
+     * - Reads 'page' and 'gender' from the request.
+     * - Fetches the relevant batch of users from cache or API.
+     * - Slices the batch to get only the users for the current page.
+     * - Streams a CSV download containing Name, Email, Gender, and Nationality columns.
+     * - Handles API errors gracefully by redirecting back with an error message.
+     */
     public function export(Request $request)
     {
+        // Get the current page number from the request, default to 1
         $page = (int) $request->input('page', 1);
+        // Get the selected gender filter from the request
         $gender = $request->input('gender');
+        // Get the Random User API URL from environment or use default
         $apiUrl = env('RANDOM_USER_API_URL', 'https://randomuser.me/api/');
+        // Get the number of results to fetch per batch from environment or use 50
         $resultsCount = (int) env('RANDOM_USER_API_RESULTS', 50);
+        // Build a cache key based on gender and batch number (10 users per page, 5 pages per batch)
         $cacheKey = 'users_' . ($gender ?: 'all') . '_batch_' . ceil($page / 5);
         try {
+            // Try to get users from cache, or fetch from API and cache for 5 minutes (300 seconds)
             $users = app('cache')->remember($cacheKey, 300, function () use ($gender, $apiUrl, $resultsCount) {
+                // Build the query for the API request
                 $query = ['results' => $resultsCount];
+                // If gender is set to 'male' or 'female', add it to the query
                 if (in_array($gender, ['male', 'female'])) $query['gender'] = $gender;
+                // Make the HTTP GET request to the API
                 $response = app('http')->get($apiUrl, $query);
+                // If the response is not OK or does not contain 'results', throw an exception
                 if (!$response->ok() || !isset($response['results'])) {
                     throw new \Exception('Invalid API response');
                 }
+                // Return the users array from the API response
                 return $response['results'];
             });
+            // Set the number of users per page
             $perPage = 10;
+            // Calculate the offset for the current page within the batch
             $offset = (($page - 1) % ceil($resultsCount / $perPage)) * $perPage;
+            // Slice the users array to get only the users for the current page
             $paginatedUsers = array_slice($users, $offset, $perPage);
         } catch (\Throwable $e) {
+            // If any error occurs, redirect back with an error message
             return redirect()->back()->with('error', 'Unable to fetch users at this time. Please try again later.');
         }
+        // Set the headers for the CSV download response
         $headers = [
             'Content-Type' => 'text/csv',
             'Content-Disposition' => 'attachment; filename="users.csv"',
         ];
+        // Stream the CSV file as a response
         return response()->stream(function () use ($paginatedUsers) {
+            // Create a CSV writer using a temporary file object
             $csv = \League\Csv\Writer::createFromFileObject(new \SplTempFileObject());
+            // Insert the CSV header row
             $csv->insertOne(['Name', 'Email', 'Gender', 'Nationality']);
+            // Insert each user's data as a row in the CSV
             foreach ($paginatedUsers as $u) {
                 $csv->insertOne([
                     $u['name']['first'] . ' ' . $u['name']['last'],
@@ -145,7 +174,8 @@ class UserController extends Controller
                     $u['nat']
                 ]);
             }
-            $csv->output();
+            // Output the CSV to the response stream
+            echo $csv->toString();
         }, 200, $headers);
     }
 }
