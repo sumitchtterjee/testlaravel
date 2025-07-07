@@ -12,10 +12,10 @@
         @endif
         <h2>Display the following user details in a table:</h2>
         
-        <form method="GET" style="margin-bottom: 16px; display: inline-block;">
+        <form method="POST" action="{{ route('users.export') }}" style="margin-bottom: 16px; display: inline-block;">
+            @csrf
             <input type="hidden" name="gender" value="{{ $gender }}">
             <input type="hidden" name="page" value="{{ $page ?? 1 }}">
-            <input type="hidden" name="export" value="1">
             <button type="submit" class="btn btn-success">Export to CSV</button>
         </form>
         <div class="table-responsive">

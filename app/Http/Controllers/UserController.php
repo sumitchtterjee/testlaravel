@@ -90,38 +90,6 @@ class UserController extends Controller
             // Set paginator to null since pagination cannot proceed on error
             $paginator = null;
         }
-        // If export is requested and there is no error
-        if ($export && !$error) {
-            // Define headers for CSV file download
-            $csvHeaders = [
-                'Content-Type' => 'text/csv',
-                'Content-Disposition' => 'attachment; filename="users.csv"',
-            ];
-            // Define a callback function to generate and output CSV data
-            $callback = function () use ($users) {
-                // Create a CSV writer using a temporary file object
-                $csv = Writer::createFromFileObject(new \SplTempFileObject());
-                // Insert the header row into the CSV
-                $csv->insertOne(['Name', 'Email', 'Gender', 'Nationality']);
-                // Loop through each user and insert their data as a row in the CSV
-                foreach ($users as $user) {
-                    $csv->insertOne([
-                        // Concatenate first and last name for the Name column
-                        $user['name']['first'] . ' ' . $user['name']['last'],
-                        // Insert the user's email
-                        $user['email'],
-                        // Capitalize the first letter of the user's gender
-                        ucfirst($user['gender']),
-                        // Insert the user's nationality
-                        $user['nat']
-                    ]);
-                }
-                // Output the CSV as a string to the response
-                echo $csv->toString();
-            };
-            // Return a streamed response to download the generated CSV file
-            return response()->stream($callback, 200, $csvHeaders);
-        }
         // Render the 'user' view, passing all relevant data to the template
         return view('user', [
             // The users to display on the current page
@@ -137,5 +105,47 @@ class UserController extends Controller
             // The paginator instance for pagination controls
             'paginator' => $paginator
         ]);
+    }
+
+    public function export(Request $request)
+    {
+        $page = (int) $request->input('page', 1);
+        $gender = $request->input('gender');
+        $apiUrl = env('RANDOM_USER_API_URL', 'https://randomuser.me/api/');
+        $resultsCount = (int) env('RANDOM_USER_API_RESULTS', 50);
+        $cacheKey = 'users_' . ($gender ?: 'all') . '_batch_' . ceil($page / 5);
+        try {
+            $users = app('cache')->remember($cacheKey, 300, function () use ($gender, $apiUrl, $resultsCount) {
+                $query = ['results' => $resultsCount];
+                if (in_array($gender, ['male', 'female'])) $query['gender'] = $gender;
+                $response = app('http')->get($apiUrl, $query);
+                if (!$response->ok() || !isset($response['results'])) {
+                    throw new \Exception('Invalid API response');
+                }
+                return $response['results'];
+            });
+            $perPage = 10;
+            $offset = (($page - 1) % ceil($resultsCount / $perPage)) * $perPage;
+            $paginatedUsers = array_slice($users, $offset, $perPage);
+        } catch (\Throwable $e) {
+            return redirect()->back()->with('error', 'Unable to fetch users at this time. Please try again later.');
+        }
+        $headers = [
+            'Content-Type' => 'text/csv',
+            'Content-Disposition' => 'attachment; filename="users.csv"',
+        ];
+        return response()->stream(function () use ($paginatedUsers) {
+            $csv = \League\Csv\Writer::createFromFileObject(new \SplTempFileObject());
+            $csv->insertOne(['Name', 'Email', 'Gender', 'Nationality']);
+            foreach ($paginatedUsers as $u) {
+                $csv->insertOne([
+                    $u['name']['first'] . ' ' . $u['name']['last'],
+                    $u['email'],
+                    ucfirst($u['gender']),
+                    $u['nat']
+                ]);
+            }
+            $csv->output();
+        }, 200, $headers);
     }
 }

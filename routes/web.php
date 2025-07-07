@@ -8,3 +8,4 @@ Route::get('/', function () {
 });
 
 Route::get('/users', [UserController::class, 'index']);
+Route::post('/users/export', [UserController::class, 'export'])->name('users.export');
